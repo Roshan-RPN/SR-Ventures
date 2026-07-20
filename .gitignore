@@ -1,0 +1,12 @@
+# Unused heavy source/media (not referenced by the site)
+Video/
+Images/*.psd
+
+# Agent tooling / workflow docs — not part of the website
+skills/
+
+# Backups & temp
+*.backup.md
+.tmp/
+.DS_Store
+Thumbs.db

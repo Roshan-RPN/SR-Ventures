@@ -1,0 +1,26 @@
+# SR Ventures — Builders & Interiors
+# Allow all standard crawlers
+User-agent: *
+Allow: /
+
+# Explicitly allow AI search crawlers (so we can be cited in AI answers)
+User-agent: GPTBot
+Allow: /
+User-agent: ChatGPT-User
+Allow: /
+User-agent: PerplexityBot
+Allow: /
+User-agent: ClaudeBot
+Allow: /
+User-agent: anthropic-ai
+Allow: /
+User-agent: Google-Extended
+Allow: /
+User-agent: Bingbot
+Allow: /
+
+# Block training-only crawler (optional middle ground)
+User-agent: CCBot
+Disallow: /
+
+Sitemap: https://srventures.example/sitemap.xml
