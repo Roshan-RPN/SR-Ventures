@@ -728,12 +728,13 @@ function bootAnimated() {
     const POLE = 0.9, PER = 1.2, FIN = 0.8, HOLD = 0.6, EXIT = 1.4;
     const TOTAL = POLE + PER * N + FIN + HOLD + EXIT;
 
-    // Stage text is now revealed IN LOCKSTEP with its rib (scrubbed inside the
-    // timeline below), so both start together and the stage is fully visible
-    // exactly when the rib is fully open. On desktop/tablet the stages are
-    // absolutely stacked, so we drive opacity/y directly and keep them all
-    // `visibility:visible`; the number/tick/live state is flipped by a callback
-    // at each rib's midpoint. `cur` only tracks the number/tick/live readout.
+    // Stage text reveals IN STEP with its rib, then HOLDS fully visible while
+    // that rib rests open. Only when the NEXT rib starts opening does the current
+    // stage fade out (as the next stage fades in) — so text only ever transitions
+    // while a rib is actively opening, never during the rest. On desktop/tablet
+    // the stages are absolutely stacked, so we drive opacity/y directly and keep
+    // them all `visibility:visible`; the number/tick/live state is flipped by a
+    // callback at each rib's midpoint. `cur` only tracks the number/tick/live readout.
     let cur = -1;
     // desktop/tablet: crossfade requires all stages painted; opacity drives show/hide
     const STACKED = window.matchMedia('(min-width: 981px)').matches;
@@ -787,22 +788,28 @@ function bootAnimated() {
       });
       tl.to(pole, { strokeDashoffset: 0, duration: POLE, ease: 'none' }, 0);
       const RIB_DUR = PER * 0.85;
+      // Text moves only while a rib is opening: it reveals/exits over the FIRST
+      // part of each rib's fold, then HOLDS while the rib rests. TXT_DUR is that
+      // active-transition slice (a bit shorter than the fold so the stage settles
+      // fully visible before the rest begins).
+      const TXT_DUR = RIB_DUR * 0.7;
       // scrubbing back above rib #1's midpoint clears the readout to empty
       tl.call(markStage, [-1], POLE);
       panels.forEach((p, i) => {
         const at = POLE + PER * i;
         // the rib folds open across [at, at + RIB_DUR]
         tl.from(p, { svgOrigin: '300 72', rotation: foldRots[i], opacity: 0, duration: RIB_DUR, ease: 'power2.out' }, at);
-        // STACKED (desktop/tablet): the stage text reveals IN LOCKSTEP with its rib —
-        // same start, same duration — so it's fully visible exactly when the rib is
-        // fully open. The previous stage crossfades out over the same window.
+        // STACKED (desktop/tablet): as THIS rib starts opening, the previous stage
+        // fades OUT and this stage fades IN together, over the first TXT_DUR of the
+        // fold. Then this stage HOLDS fully visible until the NEXT rib opens.
         if (STACKED) {
-          if (i > 0) tl.to(stageEls[i - 1], { opacity: 0, y: -18, duration: RIB_DUR, ease: 'power2.in' }, at);
-          tl.fromTo(stageEls[i], { opacity: 0, y: 26 }, { opacity: 1, y: 0, duration: RIB_DUR, ease: 'power2.out' }, at);
+          if (i > 0) tl.to(stageEls[i - 1], { opacity: 0, y: -18, duration: TXT_DUR, ease: 'power2.in' }, at);
+          tl.fromTo(stageEls[i], { opacity: 0, y: 26 }, { opacity: 1, y: 0, duration: TXT_DUR, ease: 'power2.out' }, at);
         }
-        // flip number/tick/live highlight at the rib's midpoint (state only)
-        tl.call(markStage, [i], at + RIB_DUR * 0.5);
+        // flip number/tick/live highlight partway through the reveal (state only)
+        tl.call(markStage, [i], at + TXT_DUR * 0.5);
       });
+      // after the LAST rib, the final stage simply holds — nothing fades it out.
       // FINALE — glow blooms while everything is still on screen
       const finAt = POLE + PER * N;
       tl.to(glow, { opacity: 0.5, duration: FIN * 0.7 }, finAt);
