@@ -62,20 +62,58 @@ gallery.innerHTML = projects.map(card).join('');
 
 const items = () => Array.from(gallery.querySelectorAll('.pf-item'));
 
+const PF_MOBILE = window.matchMedia('(max-width: 768px)').matches;
+/* IMAGE REVEAL: instead of just fading/sliding the whole card, wipe the frame
+   open with a clip-path while the IMAGE inside eases down from a gentle zoom, so
+   the photo settles into place behind the opening mask — a clean editorial reveal
+   that reads well on desktop and mobile. Shared by the scroll batch and the
+   first-load intro so every path animates identically. */
+const pfImgOf = (el) => el.querySelector('img');
+function primePfCard(el) {
+  gsap.set(el, { opacity: 0, y: PF_MOBILE ? 34 : 48,
+    clipPath: 'inset(0% 0% 100% 0%)', webkitClipPath: 'inset(0% 0% 100% 0%)' });
+  gsap.set(pfImgOf(el), { scale: 1.2, transformOrigin: '50% 50%' });
+}
+function revealPfCard(el, delay = 0) {
+  const img = pfImgOf(el);
+  const tl = gsap.timeline({ delay });
+  tl.to(el, {
+    opacity: 1, y: 0,
+    clipPath: 'inset(0% 0% 0% 0%)', webkitClipPath: 'inset(0% 0% 0% 0%)',
+    duration: PF_MOBILE ? 0.9 : 1.05, ease: 'power4.out', overwrite: true,
+    onComplete: () => gsap.set(el, { clearProps: 'clipPath,webkitClipPath,transform' })
+  }, 0)
+    .to(img, { scale: 1, duration: PF_MOBILE ? 1.05 : 1.25, ease: 'power3.out', overwrite: true,
+      onComplete: () => gsap.set(img, { clearProps: 'transform' }) }, 0);
+  return tl;
+}
+
 /* ---- Scroll-driven reveal: each card slides up + fades as it enters ----
    gsap.set primes the hidden state; a batch animates whatever just entered.
    A once-safety forces everything visible if a batch is ever skipped, so cards
    below the fold can never stay stranded at opacity 0. Rebuilt after each filter. */
 let pfHeaderTl = null;
-function revealGallery() {
+/* onlyBelowFold: when true, the scroll batch is built ONLY from cards below the
+   fold — the initially-visible row is owned by introVisibleCards() so it plays a
+   real entrance on first load. When false (filter changes), the whole visible set
+   is batched, since the filter's own crossfade already handles in-view cards. */
+function revealGallery(onlyBelowFold) {
   if (REDUCED) return;
   ScrollTrigger.getAll().forEach(t => { if (t.vars && t.vars.id === 'pf-card') t.kill(); });
   const cards = items().filter(el => el.style.display !== 'none');
-  gsap.set(cards, { opacity: 0, y: 54, scale: 0.96 });
-  ScrollTrigger.batch(cards, {
+  // Only PRIME cards that are still below the fold — cards already on screen must
+  // not be re-hidden (that would blank the top of a freshly-filtered category).
+  const H = window.innerHeight;
+  const below = cards.filter(el => el.getBoundingClientRect().top >= H * 0.9);
+  below.forEach(primePfCard);
+  // On first load the in-view row is animated by introVisibleCards(); batching it
+  // here too would fire onEnter immediately and snap it visible, killing that
+  // entrance. So build the batch from just the below-fold cards in that case.
+  const batchTargets = onlyBelowFold ? below : cards;
+  ScrollTrigger.batch(batchTargets, {
     id: 'pf-card',
     start: 'top 92%',
-    onEnter: (els) => gsap.to(els, { opacity: 1, y: 0, scale: 1, stagger: 0.09, duration: 1, ease: 'power3.out', overwrite: true })
+    onEnter: (els) => els.forEach((el, i) => revealPfCard(el, i * 0.09))
   });
   // safety: anything still hidden after a beat gets forced visible
   ScrollTrigger.refresh();
@@ -102,7 +140,23 @@ if (!REDUCED) {
       scrollTrigger: { trigger: '.pf-cta-band', start: 'top 85%' } });
 }
 
-revealGallery();
+/* First load (incl. after a refresh, which restarts at the top): the gallery
+   cards already in view must visibly ANIMATE IN too — otherwise the top row just
+   appears statically and the page reads as "no animation on refresh". Below-fold
+   cards keep their scroll-driven reveal via revealGallery(). This runs once. */
+function introVisibleCards() {
+  if (REDUCED) return;
+  const H = window.innerHeight;
+  const inView = items().filter(el => el.style.display !== 'none' && el.getBoundingClientRect().top < H * 0.92);
+  if (!inView.length) return;
+  inView.forEach(primePfCard);
+  inView.forEach((el, i) => revealPfCard(el, 0.55 + i * 0.1));
+}
+introVisibleCards();
+
+// first load: below-fold cards get the scroll batch; the in-view row is owned by
+// introVisibleCards() above so it plays a visible entrance after a refresh.
+revealGallery(true);
 
 /* Filter WITHOUT Flip and WITHOUT any translucent/scaled ghost frames.
    The old version faded per-card with scale mid-transition, which showed faint
@@ -138,20 +192,29 @@ function applyFilter(cat) {
     onComplete: () => {
       // 2. swap the visible set while the grid is completely invisible
       setDisplay(cat);
-      // 3. fade the grid back in as one block, then let its cards settle with a
-      //    tiny upward drift (transform only — opacity is carried by the grid,
-      //    so individual cards are never seen at partial opacity).
+      // 3. fade the grid back in as one block. Cards already IN VIEW settle with a
+      //    tiny upward drift; cards BELOW THE FOLD are re-primed hidden so they get
+      //    the same scroll-driven reveal the "All" view has — previously the filter
+      //    left every filtered card fully visible, so a category had no scroll
+      //    animation at all. revealGallery() rebuilds the per-card batch for the
+      //    new visible set.
       const shown = items().filter(el => el.style.display !== 'none');
-      gsap.set(shown, { y: 18 });
       gsap.to(gallery, { opacity: 1, duration: 0.28, ease: 'power1.out', overwrite: true });
-      gsap.to(shown, { y: 0, duration: 0.55, stagger: 0.04, ease: 'power3.out',
-        overwrite: true, onComplete: () => gsap.set(shown, { clearProps: 'transform' }) });
-      ScrollTrigger.refresh();
+      const H = window.innerHeight;
+      const inView = shown.filter(el => el.getBoundingClientRect().top < H * 0.9);
+      gsap.set(inView, { opacity: 1, y: 18, clearProps: 'clipPath,webkitClipPath' });
+      gsap.set(inView.map(pfImgOf), { clearProps: 'transform' });
+      gsap.to(inView, { y: 0, duration: 0.55, stagger: 0.04, ease: 'power3.out',
+        overwrite: true, onComplete: () => gsap.set(inView, { clearProps: 'transform' }) });
+      // (re)builds the scroll reveal so below-the-fold cards animate in on scroll
+      revealGallery();
     } });
   // absolute safety: if anything interrupts, force a clean visible state
   applyFilter._t = setTimeout(() => {
     gsap.set(gallery, { opacity: 1, clearProps: 'transform' });
-    gsap.set(items().filter(el => el.style.display !== 'none'), { opacity: 1, y: 0, clearProps: 'transform' });
+    const shown = items().filter(el => el.style.display !== 'none');
+    gsap.set(shown, { opacity: 1, y: 0, clearProps: 'transform,clipPath,webkitClipPath' });
+    gsap.set(shown.map(pfImgOf), { clearProps: 'transform' });
   }, 900);
 }
 

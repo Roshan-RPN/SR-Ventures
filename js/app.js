@@ -21,14 +21,14 @@ const IS_MOBILE = window.matchMedia('(max-width: 768px)').matches;
    "no animation"), and a leftover #hash makes a refresh jump into the middle of
    the site. So: force manual restoration, strip any in-page hash, and pin scroll
    to the top on load. (A real deep link from elsewhere still works — see below.) */
-if ('scrollRestoration' in history) history.scrollRestoration = 'manual';
-// Only treat it as a deep link if the user arrived from a DIFFERENT page/site.
-// A same-page refresh (referrer is this page, or no referrer) always restarts.
-const _sameOrigin = document.referrer && document.referrer.split('#')[0] === location.href.split('#')[0];
-const _deepLink = location.hash && location.hash !== '#top' && !_sameOrigin;
-if (!_deepLink) {
-  if (location.hash) history.replaceState(null, '', location.pathname + location.search);
+/* The EARLY restart decision (scrollRestoration = manual, strip #hash, scroll to
+   top) is made by an inline <script> in <head> so it runs before the browser can
+   restore a saved position — see index.html. It sets window.__SR_RESTART. Here we
+   only re-assert top at the moments the browser/Lenis might re-apply a position. */
+if (window.__SR_RESTART) {
   window.scrollTo(0, 0);
+  window.addEventListener('DOMContentLoaded', () => window.scrollTo(0, 0));
+  window.addEventListener('load', () => window.scrollTo(0, 0));
 }
 window.addEventListener('pageshow', (e) => { if (e.persisted) location.reload(); });
 
@@ -101,11 +101,13 @@ document.querySelectorAll('.faq-item').forEach(item => {
   });
 })();
 
-/* ---------- Testimonial carousel — seamless infinite loop ----------
-   True circular: the card set is cloned once, the track advances one card at a
-   time, and when the playhead passes the end of the original set it snaps back
-   by exactly one set-width (invisible, mid-gap) so it can keep going forever.
-   Arrows / keys nudge one card; dots reflect the position within the real set. */
+/* ---------- Testimonial carousel — slow CONTINUOUS auto-scroll ----------
+   A constant-velocity conveyor (not a 3-second step). The card set is cloned once
+   so the belt can wrap seamlessly: the transform drifts left every frame at a
+   gentle speed, and once it has travelled one full set-width it rebases by exactly
+   that width (invisible, since the clones are identical) to loop forever. Hover /
+   touch pause it; arrows and keys nudge it along the same belt; dots reflect which
+   real card is currently front-and-centre. */
 (function initTestiCarousel() {
   const track = document.getElementById('testi-track');
   if (!track) return;
@@ -117,15 +119,19 @@ document.querySelectorAll('.faq-item').forEach(item => {
   // Clone the whole set once so there is always a full run of cards to the right.
   originals.forEach(card => track.appendChild(card.cloneNode(true)));
 
-  let pos = 0;              // logical card index (can exceed N; we mod it)
-  let timer = null, settle, resizeT;
+  // continuous offset in px (always >= 0); we render translateX(-offset).
+  let offset = 0;
+  let setW = 0;                      // width of one full (un-cloned) set
+  const SPEED = 22;                  // px per second — slow, readable drift
+  let paused = false, onScreen = true, raf = null, last = 0, resizeT, hovering = false;
+
   const step = () => {
     const cards = track.children;
     return cards.length > 1 ? cards[1].offsetLeft - cards[0].offsetLeft : cards[0].offsetWidth;
   };
-  const setWidth = () => step() * N;
+  const measure = () => { setW = step() * N; };
 
-  // dots: one per real testimonial
+  // dots: one per real testimonial — lit dot = card nearest the left edge
   let dots = [];
   function buildDots() {
     dotsWrap.innerHTML = '';
@@ -133,78 +139,96 @@ document.querySelectorAll('.faq-item').forEach(item => {
     dots = Array.from(dotsWrap.children);
     setDots();
   }
-  const setDots = () => { const real = ((pos % N) + N) % N; dots.forEach((d, i) => d.classList.toggle('on', i === real)); };
+  const setDots = () => {
+    const s = step() || 1;
+    const real = ((Math.round(offset / s) % N) + N) % N;
+    dots.forEach((d, i) => d.classList.toggle('on', i === real));
+  };
 
-  // pos grows/shrinks without bound; the track always animates to the true offset
-  // (-pos*step). Because the set is cloned, offset -N*step looks identical to 0, so
-  // after each eased move settles we silently rebase pos into [0,N) — no visible jump.
-  // Result: a one-direction conveyor that wraps 8→1→2… forever, always entering from
-  // the right.
-  function apply(smooth) {
-    track.style.transition = smooth && !REDUCED ? 'transform 0.85s cubic-bezier(0.22,1,0.36,1)' : 'none';
-    track.style.transform = `translate3d(${-(pos * step())}px,0,0)`;
+  function render() {
+    // wrap the offset into [0, setW) so the belt loops forever with no visible jump
+    if (setW > 0) { offset %= setW; if (offset < 0) offset += setW; }
+    track.style.transform = `translate3d(${-offset}px,0,0)`;
     setDots();
   }
-  function rebase() {
-    // snap pos into [0,N) with NO transition — visually identical thanks to the clones
-    const norm = ((pos % N) + N) % N;
-    if (norm === pos) return;
-    pos = norm;
-    track.style.transition = 'none';
-    track.style.transform = `translate3d(${-(pos * step())}px,0,0)`;
-    // force reflow so the next transition takes effect cleanly
-    void track.offsetWidth;
-  }
-  function go(delta) {
-    clearTimeout(settle);
-    pos += delta;
-    apply(true);
-    setDots();
-    // rebase just after the eased move finishes (mid-gap, invisible)
-    settle = setTimeout(rebase, 900);
-  }
-  const next = () => go(1);
-  const prev = () => go(-1);
 
-  function play() { stop(); if (!REDUCED) timer = setInterval(next, 3000); }
-  function stop() { if (timer) { clearInterval(timer); timer = null; } }
+  function tick(now) {
+    if (!last) last = now;
+    const dt = (now - last) / 1000; last = now;
+    if (!paused && onScreen && !REDUCED) { offset += SPEED * dt; render(); }
+    raf = requestAnimationFrame(tick);
+  }
+  function start() { if (raf == null) { last = 0; raf = requestAnimationFrame(tick); } }
+  function stopLoop() { if (raf != null) { cancelAnimationFrame(raf); raf = null; } }
+
+  // arrows / keys nudge the belt by one card — but because the belt is drifting
+  // continuously, `offset` is almost always mid-card when the click lands. Adding a
+  // raw step would leave the card half-cut. So we SNAP to the nearest card boundary
+  // first, then advance exactly one card in the pressed direction — the target card
+  // always ends perfectly aligned to the edge. The drift pauses during the eased
+  // move and resumes right after (arrows already run through this single path).
+  let nudgeTween = null;
+  function nudge(dir) {
+    const s = step();
+    if (nudgeTween) nudgeTween.kill();
+    // nearest boundary to the current (drifting) offset, then one card further on.
+    const target = (Math.round(offset / s) + dir) * s;
+    paused = true;                               // freeze the drift while we settle
+    nudgeTween = gsap.to({ v: offset }, {
+      v: target, duration: 0.7, ease: 'power3.out',
+      onUpdate: function () { offset = this.targets()[0].v; render(); },
+      onComplete: function () { offset = target; render(); paused = hovering; nudgeTween = null; }
+    });
+  }
+  function goTo(i) {
+    const s = step();
+    // shortest move to bring real card i to the left edge, staying on the belt
+    const cur = offset / s;
+    let delta = i - (((cur % N) + N) % N);
+    if (delta > N / 2) delta -= N; else if (delta < -N / 2) delta += N;
+    const target = offset + delta * s;
+    gsap.to({ v: offset }, { v: target, duration: 0.8, ease: 'power3.out',
+      onUpdate: function () { offset = this.targets()[0].v; render(); } });
+  }
 
   // convert the flex track from a native scroller into a transformed marquee
   track.style.overflow = 'visible';
   track.style.scrollSnapType = 'none';
+  track.style.transition = 'none';
+  measure();
   buildDots();
-  apply(false);
+  render();
+  start();
 
-  document.getElementById('t-next').addEventListener('click', () => { next(); play(); });
-  document.getElementById('t-prev').addEventListener('click', () => { prev(); play(); });
+  document.getElementById('t-next').addEventListener('click', () => nudge(1));
+  document.getElementById('t-prev').addEventListener('click', () => nudge(-1));
   window.addEventListener('keydown', (e) => {
     const t = e.target;
     if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.tagName === 'SELECT')) return;
-    if (e.key === 'ArrowRight') { next(); play(); }
-    else if (e.key === 'ArrowLeft') { prev(); play(); }
+    if (e.key === 'ArrowRight') nudge(1);
+    else if (e.key === 'ArrowLeft') nudge(-1);
   });
-  dots.forEach((d, i) => d.addEventListener('click', () => { pos = i; apply(true); play(); }));
+  dots.forEach((d, i) => d.addEventListener('click', () => goTo(i)));
 
   const wrap = track.parentElement; // .testi-carousel
-  wrap.addEventListener('mouseenter', stop);
-  wrap.addEventListener('mouseleave', () => play());
+  wrap.addEventListener('mouseenter', () => { hovering = true; paused = true; });
+  wrap.addEventListener('mouseleave', () => { hovering = false; if (!nudgeTween) paused = false; });
 
-  // touch swipe on the track
-  let sx = 0, dragging = false;
-  track.addEventListener('touchstart', (e) => { stop(); sx = e.touches[0].clientX; dragging = true; }, { passive: true });
-  track.addEventListener('touchend', (e) => {
-    if (!dragging) return; dragging = false;
-    const dx = e.changedTouches[0].clientX - sx;
-    if (Math.abs(dx) > 40) (dx < 0 ? next() : prev());
-    play();
+  // touch swipe drags the belt directly, then resumes the drift
+  let sx = 0, sOff = 0, dragging = false;
+  track.addEventListener('touchstart', (e) => { paused = true; sx = e.touches[0].clientX; sOff = offset; dragging = true; }, { passive: true });
+  track.addEventListener('touchmove', (e) => {
+    if (!dragging) return;
+    offset = sOff - (e.touches[0].clientX - sx); render();
   }, { passive: true });
+  track.addEventListener('touchend', () => { dragging = false; paused = false; }, { passive: true });
 
-  window.addEventListener('resize', () => { clearTimeout(resizeT); resizeT = setTimeout(() => apply(false), 150); });
+  window.addEventListener('resize', () => { clearTimeout(resizeT); resizeT = setTimeout(() => { measure(); render(); }, 150); });
 
-  // autoplay only while the carousel is on screen
+  // only drift while the carousel is on screen (saves work off-screen)
   const io = new IntersectionObserver(
-    (ents) => ents.forEach((en) => (en.isIntersecting ? play() : stop())),
-    { threshold: 0.2 }
+    (ents) => ents.forEach((en) => { onScreen = en.isIntersecting; }),
+    { threshold: 0.15 }
   );
   io.observe(track);
 })();
@@ -287,6 +311,26 @@ function bootAnimated() {
   // scrolling tracks the wheel closely instead of drifting (the old 1.5s / 0.85x
   // read as laggy).
   const lenis = new Lenis({ duration: 1.05, wheelMultiplier: 1, easing: (t) => Math.min(1, 1.001 - Math.pow(2, -10 * t)), smoothWheel: true });
+  // On a fresh load / refresh, force Lenis itself to the very top so the intro
+  // always plays from frame 0 — the browser can otherwise hand Lenis a restored
+  // mid-page offset before the first frame paints.
+  if (window.__SR_RESTART) {
+    lenis.scrollTo(0, { immediate: true, force: true });
+    requestAnimationFrame(() => lenis.scrollTo(0, { immediate: true, force: true }));
+  } else if (location.hash && location.hash.length > 1) {
+    // Genuine cross-page deep link (e.g. Home / breadcrumb on portfolio.html →
+    // index.html#home-hero). __SR_RESTART is false so we DON'T force the top;
+    // instead drive Lenis to the target once layout + ScrollTrigger have settled,
+    // otherwise the native hash jump lands imprecisely against the tall film zone.
+    const goHash = () => {
+      const target = document.querySelector(location.hash);
+      if (target) lenis.scrollTo(target, { offset: -40, immediate: true, force: true });
+    };
+    window.addEventListener('load', () => {
+      requestAnimationFrame(() => { ScrollTrigger.refresh(); goHash(); });
+      setTimeout(goHash, 300);
+    });
+  }
   lenis.on('scroll', ScrollTrigger.update);
   gsap.ticker.add((time) => lenis.raf(time * 1000));
   gsap.ticker.lagSmoothing(0);
@@ -501,15 +545,17 @@ function bootAnimated() {
       if (el.closest('#home-hero')) return; // hero has its own choreography below
       if (IS_MOBILE) {
         // mobile: reveal is scrubbed to the scroll, so it plays slower and only
-        // completes once the block is fully in view (no blur — cheaper to paint)
-        gsap.fromTo(el, { y: 42, opacity: 0 },
-          { y: 0, opacity: 1, ease: 'none',
-            scrollTrigger: { trigger: el, start: 'top 96%', end: 'top 62%', scrub: 0.6 } });
+        // completes once the block is fully in view (no blur — cheaper to paint).
+        // A little more travel + a gentle scale so blocks clearly settle in.
+        gsap.fromTo(el, { y: 56, opacity: 0, scale: 0.98 },
+          { y: 0, opacity: 1, scale: 1, ease: 'none',
+            scrollTrigger: { trigger: el, start: 'top 96%', end: 'top 60%', scrub: 0.6 } });
       } else {
         gsap.fromTo(el,
-          { y: 46, opacity: 0, filter: 'blur(6px)' },
-          { y: 0, opacity: 1, filter: 'blur(0px)', duration: 1.5, ease: 'power3.out',
-            scrollTrigger: { trigger: el, start: 'top 92%' } }
+          { y: 64, opacity: 0, scale: 0.97, filter: 'blur(8px)' },
+          { y: 0, opacity: 1, scale: 1, filter: 'blur(0px)', duration: 1.5, ease: 'power3.out',
+            scrollTrigger: { trigger: el, start: 'top 90%' },
+            onComplete: () => gsap.set(el, { clearProps: 'filter' }) }
         );
       }
     });
@@ -581,16 +627,22 @@ function bootAnimated() {
     function splitWords(h) {
       if (h.dataset.split) return;
       h.dataset.split = '1';
-      let lastSpan = null; // punctuation-only "words" glue onto the previous span
+      let lastInner = null; // punctuation-only "words" glue onto the previous word
       const wrapWords = (node, into) => {
         node.textContent.split(/(\s+)/).forEach(w => {
           if (!w) return;
           if (/^\s+$/.test(w)) { into.appendChild(document.createTextNode(' ')); return; }
-          if (/^[,.;:!?)\]»”']+$/.test(w) && lastSpan) { lastSpan.textContent += w; return; }
+          if (/^[,.;:!?)\]»”']+$/.test(w) && lastInner) { lastInner.textContent += w; return; }
+          // .wi is a per-word CLIP (overflow:hidden); .wi-in is the piece that
+          // transforms — so a word can rise from fully below its own line box
+          // without ever poking into the line above/below during the reveal.
           const s = document.createElement('span');
-          s.className = 'wi'; s.textContent = w;
+          s.className = 'wi';
+          const inner = document.createElement('span');
+          inner.className = 'wi-in'; inner.textContent = w;
+          s.appendChild(inner);
           into.appendChild(s);
-          lastSpan = s;
+          lastInner = inner;
         });
       };
       const out = document.createDocumentFragment();
@@ -604,53 +656,64 @@ function bootAnimated() {
     document.querySelectorAll('.section-heading, .closing h2, .contact-info h2').forEach(h => {
       if (h.closest('.hero-standalone')) return;         // intro handles its own
       splitWords(h);
-      gsap.fromTo(h.querySelectorAll('.wi'), { y: '0.85em', opacity: 0 },
-        { y: 0, opacity: 1, duration: 1.1, ease: IS_MOBILE ? 'none' : 'power4.out', stagger: 0.05,
-          scrollTrigger: IS_MOBILE
-            ? { trigger: h, start: 'top 96%', end: 'top 55%', scrub: 0.6 }
-            : { trigger: h, start: 'top 90%' } });
+      const words = h.querySelectorAll('.wi-in');
+      if (IS_MOBILE) {
+        // mobile: scrubbed so it reveals as the heading travels in — each word rises
+        // a full line-height from inside its clip so it clearly lifts into place.
+        gsap.fromTo(words,
+          { yPercent: 118, opacity: 0 },
+          { yPercent: 0, opacity: 1, ease: 'none', stagger: 0.06,
+            scrollTrigger: { trigger: h, start: 'top 94%', end: 'top 52%', scrub: 0.6 } });
+      } else {
+        // desktop: each word swings up from fully below its own line box with a
+        // longer, springier stagger — a clear, characterful reveal instead of the
+        // old barely-visible 0.85em nudge.
+        gsap.fromTo(words,
+          { yPercent: 120, opacity: 0 },
+          { yPercent: 0, opacity: 1,
+            duration: 1.05, ease: 'power4.out', stagger: 0.07,
+            scrollTrigger: { trigger: h, start: 'top 88%' } });
+      }
     });
 
     /* ---- Section labels: the eyebrow slides in from its rule line ---- */
     document.querySelectorAll('.section-label').forEach(l => {
       if (l.closest('.hero-standalone')) return;
       if (l.closest('#home-hero') || l.closest('.stats-lead')) return; // already staggered as children
-      gsap.fromTo(l, { x: -18, opacity: 0 },
-        { x: 0, opacity: 1, duration: 0.9, ease: 'power3.out',
-          scrollTrigger: { trigger: l, start: 'top 94%' } });
+      gsap.fromTo(l, { x: -34, opacity: 0, letterSpacing: '0.62em' },
+        { x: 0, opacity: 1, letterSpacing: '0.28em', duration: 1.0, ease: 'power3.out',
+          scrollTrigger: { trigger: l, start: 'top 94%' },
+          onComplete: () => gsap.set(l, { clearProps: 'letterSpacing' }) });
     });
 
     /* ---- Stats count-block: stagger the cards in ----
        gsap.set primes the hidden state; the batch animates to visible. A safety
        ScrollTrigger forces them visible if the batch is ever skipped, so the
        200+/98%/Skilled/Quality block can never stay blank. ---- */
-    gsap.set('.stats-grid .stat', { opacity: 0, y: 40 });
+    gsap.set('.stats-grid .stat', { opacity: 0, y: 56, scale: 0.9 });
     if (IS_MOBILE) {
-      gsap.to('.stats-grid .stat', { y: 0, opacity: 1, stagger: 0.18, ease: 'none',
+      gsap.to('.stats-grid .stat', { y: 0, opacity: 1, scale: 1, stagger: 0.18, ease: 'none',
         scrollTrigger: { trigger: '.stats-grid', start: 'top 96%', end: 'top 45%', scrub: 0.7 } });
     } else {
       ScrollTrigger.batch('.stats-grid .stat', {
         start: 'top 92%',
-        onEnter: (els) => gsap.to(els, { y: 0, opacity: 1, stagger: 0.14, duration: 1.1, ease: 'power3.out', overwrite: true })
+        onEnter: (els) => gsap.to(els, { y: 0, opacity: 1, scale: 1, stagger: 0.14, duration: 1.1, ease: 'back.out(1.5)', overwrite: true })
       });
       ScrollTrigger.create({ trigger: '#trust', start: 'top 60%', once: true,
-        onEnter: () => gsap.to('.stats-grid .stat', { opacity: 1, y: 0, duration: 0.5, overwrite: 'auto' }) });
+        onEnter: () => gsap.to('.stats-grid .stat', { opacity: 1, y: 0, scale: 1, duration: 0.5, overwrite: 'auto' }) });
     }
 
     /* ---- FAQ rows: stagger as they enter (same safety net) ---- */
-    gsap.set('.faq-item', { opacity: 0, x: -28 });
+    gsap.set('.faq-item', { opacity: 0, x: -44 });
     ScrollTrigger.batch('.faq-item', {
       start: 'top 94%',
-      onEnter: (els) => gsap.to(els, { x: 0, opacity: 1, stagger: 0.12, duration: 0.95, ease: 'power3.out', overwrite: true })
+      onEnter: (els) => gsap.to(els, { x: 0, opacity: 1, stagger: 0.14, duration: 1.0, ease: 'power3.out', overwrite: true })
     });
     ScrollTrigger.create({ trigger: '#faq', start: 'top 60%', once: true,
       onEnter: () => gsap.to('.faq-item', { opacity: 1, x: 0, duration: 0.5, overwrite: 'auto' }) });
 
-    /* ---- Contact fields: gentle stagger ---- */
-    ScrollTrigger.batch('#enquiry-form .field, #enquiry-form .btn', {
-      start: 'top 90%',
-      onEnter: (els) => gsap.from(els, { y: 24, opacity: 0, stagger: 0.06, duration: 0.5, ease: 'power2.out', overwrite: true })
-    });
+    /* ---- Contact form: NO reveal animation (both views, per client). The fields
+       and submit button sit fully visible from the start — no fade/slide/stagger. */
 
     // portfolio items: each card slides + rises + fades in as it enters.
     // The umbrella section above is PINNED (huge scroll spacer), which shifts the
@@ -663,24 +726,55 @@ function bootAnimated() {
     // slide), staggered. A LATE, gentle safety only catches a card if the batch is
     // ever skipped entirely — it no longer pre-empts the real reveal.
     const pfCards = gsap.utils.toArray('#home-portfolio .pf-item');
-    const fromX = (i) => (i % 2 === 0 ? -1 : 1) * (IS_MOBILE ? 42 : 54);
-    pfCards.forEach((el, i) => gsap.set(el, { x: fromX(i), y: IS_MOBILE ? 40 : 60, opacity: 0, scale: 0.94 }));
-    ScrollTrigger.batch(pfCards, {
-      start: 'top 88%',
-      onEnter: (els) => gsap.to(els, {
-        x: 0, y: 0, opacity: 1, scale: 1,
-        duration: IS_MOBILE ? 1.0 : 1.1, ease: 'power3.out',
-        stagger: 0.12, overwrite: true,
-        onComplete: () => gsap.set(els, { clearProps: 'transform' })
-      })
-    });
+    // IMAGE REVEAL (both views): the card frame stays put — no rotate, no sideways
+    // slide (those skewed the clipped/rounded figure and its image looked wrong).
+    // Instead each card is revealed with a clean editorial wipe: a clip-path opens
+    // the frame top→bottom while the IMAGE inside eases from a gentle zoom (1.22)
+    // down to 1, so the photo settles into place behind the opening mask. The frame
+    // also rises + fades a touch. This is the polished "photo reveal" look and reads
+    // identically well on desktop and mobile.
+    const pfImg = (el) => el.querySelector('img');
+    const primeCard = (el) => {
+      gsap.set(el, { y: IS_MOBILE ? 40 : 56, opacity: 0,
+        clipPath: 'inset(0% 0% 100% 0%)', webkitClipPath: 'inset(0% 0% 100% 0%)' });
+      gsap.set(pfImg(el), { scale: 1.22, transformOrigin: '50% 50%' });
+    };
+    const revealCard = (el, delay = 0) => {
+      const tl = gsap.timeline({ delay });
+      tl.to(el, {
+        y: 0, opacity: 1,
+        clipPath: 'inset(0% 0% 0% 0%)', webkitClipPath: 'inset(0% 0% 0% 0%)',
+        duration: IS_MOBILE ? 0.95 : 1.1, ease: 'power4.out', overwrite: true,
+        onComplete: () => gsap.set(el, { clearProps: 'clipPath,webkitClipPath,transform' })
+      }, 0)
+        .to(pfImg(el), {
+          scale: 1, duration: IS_MOBILE ? 1.1 : 1.3, ease: 'power3.out', overwrite: true,
+          onComplete: () => gsap.set(pfImg(el), { clearProps: 'transform' })
+        }, 0);
+      return tl;
+    };
+    pfCards.forEach(primeCard);
+    if (IS_MOBILE) {
+      // Mobile: reveal each card ONE AT A TIME as it individually crosses into view.
+      pfCards.forEach((el) => {
+        ScrollTrigger.create({
+          trigger: el, start: 'top 88%', once: true,
+          onEnter: () => revealCard(el)
+        });
+      });
+    } else {
+      // Desktop: batch whatever entered together and stagger the wipe.
+      ScrollTrigger.batch(pfCards, {
+        start: 'top 86%',
+        onEnter: (els) => els.forEach((el, i) => revealCard(el, i * 0.12))
+      });
+    }
     // LATE safety: only if a card is somehow still hidden once the section is
     // fully centred does it get forced on — the real per-card reveal fires first.
     ScrollTrigger.create({ trigger: '#portfolio', start: 'top 20%', once: true,
       onEnter: () => {
         const stuck = pfCards.filter(el => +gsap.getProperty(el, 'opacity') < 0.05);
-        if (stuck.length) gsap.to(stuck, { x: 0, y: 0, opacity: 1, scale: 1, duration: 0.5, stagger: 0.08,
-          overwrite: 'auto', onComplete: () => gsap.set(stuck, { clearProps: 'transform' }) });
+        stuck.forEach(el => revealCard(el));
       } });
 
     // testimonial cards fan in once when the section arrives
@@ -742,12 +836,17 @@ function bootAnimated() {
     // them all `visibility:visible`; the number/tick/live state is flipped by a
     // callback at each rib's midpoint. `cur` only tracks the number/tick/live readout.
     let cur = -1;
-    // desktop/tablet: crossfade requires all stages painted; opacity drives show/hide
+    // desktop/tablet: stages are absolutely stacked. We DO NOT crossfade them with
+    // overlapping opacity tweens on the scrub timeline — under a fast flick/scrubbed
+    // reverse those tweens lag and leave 2-3 stage texts painted on top of each
+    // other (the "overlapping text" glitch). Instead the active stage is chosen
+    // deterministically in markStage() via the .is-on class, and CSS transitions
+    // handle a clean single fade. At any playhead time exactly ONE stage is shown.
     const STACKED = window.matchMedia('(min-width: 981px)').matches;
     stageEls.forEach((el) => el.classList.remove('is-on'));
-    if (STACKED) gsap.set(stageEls, { opacity: 0, y: 26, visibility: 'visible' });
-    // flips the number, ticks and live-rib highlight to stage `idx` (state only —
-    // the text opacity is animated by the scrub timeline, not here)
+    if (STACKED) gsap.set(stageEls, { clearProps: 'opacity,transform,visibility' });
+    // flips the number, ticks, live-rib highlight AND the visible stage text to
+    // stage `idx` — all driven from the deterministic playhead, so nothing ghosts.
     const countEl = numEl.closest('.umb-count');
     // start hidden explicitly: markStage(-1) early-returns on the first call (cur is
     // already -1), so the counter must begin without .is-live on its own.
@@ -828,13 +927,10 @@ function bootAnimated() {
         const at = INTRO + POLE + PER * i;
         // the rib folds open across [at, at + RIB_DUR]
         tl.from(p, { svgOrigin: '300 72', rotation: foldRots[i], opacity: 0, duration: RIB_DUR, ease: 'power2.out' }, at);
-        // STACKED (desktop/tablet): as THIS rib starts opening, the previous stage
-        // fades OUT and this stage fades IN together, over the first TXT_DUR of the
-        // fold. Then this stage HOLDS fully visible until the NEXT rib opens.
-        if (STACKED) {
-          if (i > 0) tl.to(stageEls[i - 1], { opacity: 0, y: -18, duration: TXT_DUR, ease: 'power2.in' }, at);
-          tl.fromTo(stageEls[i], { opacity: 0, y: 26 }, { opacity: 1, y: 0, duration: TXT_DUR, ease: 'power2.out' }, at);
-        }
+        // STACKED stage text is NOT tweened here — markStage() (driven from the
+        // deterministic playhead in onUpdate) swaps the .is-on stage, and CSS
+        // handles the single clean fade. This guarantees exactly one stage is ever
+        // visible, even during a fast flick or scrubbed reverse.
       });
       // after the LAST rib, the final stage simply holds — nothing fades it out.
       // FINALE — glow blooms while everything is still on screen

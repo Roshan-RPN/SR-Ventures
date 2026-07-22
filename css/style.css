@@ -412,8 +412,16 @@ h1, h2, h3, h4,
 .umb-count #u-num { color: var(--accent); font-size: clamp(2.4rem, 3.4vw, 3.4rem); font-weight: 500; line-height: 1; }
 .umb-count .of { font-size: 0.9rem; color: var(--ink-on-dark-2); letter-spacing: 0.14em; }
 .u-stages { position: relative; min-height: clamp(240px, 32vh, 320px); }
-.u-stage { position: absolute; inset: 0; opacity: 0; visibility: hidden; pointer-events: none; }
-.u-stage.is-on { opacity: 1; visibility: visible; pointer-events: auto; }
+.u-stage {
+  position: absolute; inset: 0; opacity: 0; visibility: hidden; pointer-events: none;
+  transform: translateY(26px);
+  transition: opacity 0.4s ease, transform 0.5s cubic-bezier(0.22,1,0.36,1), visibility 0s linear 0.4s;
+}
+.u-stage.is-on {
+  opacity: 1; visibility: visible; pointer-events: auto;
+  transform: translateY(0);
+  transition: opacity 0.45s ease, transform 0.55s cubic-bezier(0.22,1,0.36,1), visibility 0s;
+}
 .u-k { font-family: var(--font-display); font-size: 0.85rem; color: var(--accent); letter-spacing: 0.1em; text-transform: uppercase; }
 .u-stage h3 { font-family: var(--font-display); font-weight: 500; font-size: clamp(1.7rem, 2.4vw, 2.3rem); letter-spacing: -0.02em; margin: 0.6rem 0 0.8rem; }
 .u-stage p { color: var(--ink-on-dark-2); font-size: 1rem; line-height: 1.65; max-width: 44ch; }
@@ -708,6 +716,17 @@ body.portfolio-page { background: var(--bg-light); color: var(--ink-on-light); }
   .hero2 { grid-template-columns: 1fr; gap: 1.6rem; }
   .hero2-copy .section-heading { font-size: clamp(1.8rem, 7vw, 2.6rem); }
   .hero2-fig img { min-height: 0; aspect-ratio: 3 / 2; }
+  /* Mobile: the light hero must fill the full viewport so the dark trust section
+     below can never peek in at the bottom edge. Center the block vertically and
+     guarantee the light background covers the whole screen. */
+  #home-hero { min-height: 100svh; display: flex; align-items: center; }
+  #home-hero .block { width: 100%; }
+  /* Same fix for testimonials (dark): it was shorter than the viewport, so the
+     light FAQ section below peeked in at the bottom. Guarantee it fills the screen
+     so the dark background extends past the content — but keep the content
+     top-aligned (natural flow) so the heading still leads as you scroll in, rather
+     than being pushed above the fold by vertical centering. */
+  #testimonials { min-height: 100svh; }
   .stat-feature .stat-number { font-size: 2.7rem; }
   .stat-feature .stat-suffix { font-size: 1.6rem; }
   .stat-number { font-size: 2rem; }
@@ -723,6 +742,17 @@ body.portfolio-page { background: var(--bg-light); color: var(--ink-on-light); }
   .portfolio-grid { grid-template-columns: repeat(2, 1fr); }
   .footer-grid { grid-template-columns: 1fr; }
   .pf-item figcaption { opacity: 1; transform: none; }
+  /* Contact: the section carries an inline padding-top:0 (to butt against the FAQ
+     on desktop). On mobile that made the heading collide with the sticky navbar
+     and the tall form spill past one screen. Give the heading clearance below the
+     navbar and tighten the form's vertical rhythm so it fits comfortably. */
+  #contact { padding-top: 0; }
+  #contact .block { padding-top: 1.5rem !important; }
+  #contact .contact-info h2 { font-size: clamp(1.7rem, 6.4vw, 2.2rem); margin-bottom: 0.8rem; }
+  #contact .contact-info .lead { margin-bottom: 1.4rem; }
+  #contact .form { padding: 1.25rem; }
+  #contact .field { margin-bottom: 0.8rem; }
+  #contact .field textarea { min-height: 84px; }
 }
 @media (max-width: 460px) {
   .portfolio-grid { grid-template-columns: 1fr; }
@@ -736,8 +766,17 @@ body.portfolio-page { background: var(--bg-light); color: var(--ink-on-light); }
 /* =========================================================================
    ROUND 7 — richer animation layer
    ========================================================================= */
-/* word-split heading spans (JS wraps each word in .wi) */
+/* word-split heading spans (JS wraps each word in .wi > .wi-in).
+   .wi is a per-word CLIP so .wi-in can rise from fully below its own line box
+   without poking into neighbouring lines during the staggered reveal. A touch of
+   vertical padding (offset by a negative margin) keeps ascenders/italics/descenders
+   from being clipped once the word has settled at rest. */
 .section-heading .wi, .closing h2 .wi, .contact-info h2 .wi {
+  display: inline-block; overflow: hidden;
+  padding: 0.12em 0.04em; margin: -0.12em -0.04em;
+  vertical-align: top;
+}
+.section-heading .wi-in, .closing h2 .wi-in, .contact-info h2 .wi-in {
   display: inline-block; will-change: transform;
 }
 
