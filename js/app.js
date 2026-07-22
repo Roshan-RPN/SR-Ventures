@@ -404,15 +404,20 @@ function bootAnimated() {
      loader curtain and the intro looked static by the time it was visible.) ---- */
   gsap.set('.intro-title .ch', { yPercent: 118, rotate: 5 });
   gsap.set('.intro-label, .intro-tagline, .intro-meta, .scroll-indicator', { y: 28, opacity: 0 });
+  gsap.set('.intro-logo', { opacity: 0, scale: 0.78, y: -26, filter: 'blur(6px)' });
   gsap.set('.hero-bg', { scale: 1.16 });
   let introPlayed = false;
   function introReveal() {
     if (introPlayed) return; introPlayed = true;
     const tl = gsap.timeline({ delay: 0.25 });
     tl.fromTo('.hero-bg', { opacity: 0 }, { opacity: 0.28, scale: 1, duration: 2.6, ease: 'power2.out' }, 0)
-      .to('.intro-title .ch', { yPercent: 0, rotate: 0, stagger: 0.06, duration: 1.3, ease: 'power4.out' }, 0.3)
+      // logo crowns the intro first — settles in with a soft de-blur + scale
+      .to('.intro-logo', { opacity: 1, scale: 1, y: 0, filter: 'blur(0px)', duration: 1.4, ease: 'power3.out' }, 0.1)
+      .to('.intro-title .ch', { yPercent: 0, rotate: 0, stagger: 0.06, duration: 1.3, ease: 'power4.out' }, 0.7)
       .to('.intro-label, .intro-tagline, .intro-meta, .scroll-indicator',
-        { y: 0, opacity: 1, stagger: 0.16, duration: 1.0, ease: 'power3.out' }, 1.0);
+        { y: 0, opacity: 1, stagger: 0.16, duration: 1.0, ease: 'power3.out' }, 1.4);
+    // gentle continuous float once it has landed
+    gsap.to('.intro-logo', { y: -10, duration: 3.2, ease: 'sine.inOut', repeat: -1, yoyo: true, delay: 1.8 });
   }
 
   function initScrollScene() {
@@ -761,7 +766,7 @@ function bootAnimated() {
     }
 
     // one pinned build, desktop and mobile — only the scroll distance differs
-    function buildPinned(endDist) {
+    function buildPinned(endDist, scrubVal) {
       const poleLen = pole.getTotalLength();
       gsap.set(pole, { strokeDasharray: poleLen, strokeDashoffset: poleLen });
 
@@ -806,7 +811,7 @@ function bootAnimated() {
       const tl = gsap.timeline({
         scrollTrigger: {
           trigger: umb, start: 'top top', end: '+=' + endDist,
-          pin: true, scrub: 1, anticipatePin: 1,
+          pin: true, scrub: scrubVal, anticipatePin: 1,
           onUpdate: (self) => {
             markStage(stageAt(tl.time()));
             if (self.progress > rainStart && self.progress < rainEnd && self.isActive) rainTl.play();
@@ -853,7 +858,10 @@ function bootAnimated() {
     }
 
     const mm = gsap.matchMedia();
-    mm.add('(min-width: 981px)', () => buildPinned(5660));
-    mm.add('(max-width: 980px)', () => buildPinned(3770));
+    mm.add('(min-width: 981px)', () => buildPinned(5660, 1));
+    // Mobile: longer pin distance (~410px per rib, up from ~300) + higher scrub
+    // smoothing so a single touch flick can't snap the playhead through 2-3 ribs
+    // at once — the ribs now open one at a time as you scroll.
+    mm.add('(max-width: 980px)', () => buildPinned(5200, 1.4));
   }
 }

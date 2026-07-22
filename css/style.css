@@ -200,11 +200,34 @@ h1, h2, h3, h4,
 .hero-actions { margin-top: 2.6rem; display: flex; gap: 1rem; flex-wrap: wrap; }
 
 /* ---- Intro monument title card ---- */
-.intro-inner { text-align: center; display: flex; flex-direction: column; align-items: center; }
-.intro-label { margin-bottom: clamp(1.4rem, 3vh, 2.4rem); }
+.intro-inner { text-align: center; display: flex; flex-direction: column; align-items: center; padding-bottom: 5.5rem; }
+/* Intro logo — the white-background monogram sits on a soft light plate so it reads
+   as an intentional badge on the dark hero, with an accent glow behind it. */
+.intro-logo {
+  position: relative;
+  width: clamp(120px, 16vw, 180px);
+  aspect-ratio: 1 / 1;
+  margin-bottom: clamp(1.2rem, 2.6vh, 1.9rem);
+  border-radius: 22px;
+  background: #ffffff;
+  padding: 0;
+  overflow: hidden;
+  box-shadow:
+    0 0 0 1px rgba(255, 255, 255, 0.12),
+    0 26px 60px -18px var(--accent-glow),
+    0 18px 44px -22px rgba(0, 0, 0, 0.7);
+  will-change: transform, opacity;
+}
+.intro-logo::after {
+  content: ''; position: absolute; inset: -34%;
+  background: radial-gradient(circle, var(--accent-glow) 0%, transparent 62%);
+  z-index: -1; opacity: 0.9; pointer-events: none;
+}
+.intro-logo img { width: 100%; height: 100%; object-fit: cover; border-radius: inherit; display: block; }
+.intro-label { margin-bottom: clamp(1rem, 2.4vh, 1.8rem); }
 .intro-title {
   font-family: var(--font-display); font-weight: 500;
-  font-size: clamp(2.9rem, 11.5vw, 10rem);
+  font-size: clamp(2.4rem, 8.5vw, 7rem);
   line-height: 0.95; letter-spacing: 0.005em; white-space: nowrap;
 }
 .intro-title > span { display: inline-block; overflow: hidden; padding-bottom: 0.06em; }
