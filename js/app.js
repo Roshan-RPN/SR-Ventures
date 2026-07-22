@@ -210,13 +210,13 @@ document.querySelectorAll('.faq-item').forEach(item => {
 })();
 
 /* ---------- Umbrella SVG geometry — runs in all modes ----------
-   Builds the 7 canopy panels (one per stage) + a dashed blueprint ghost.
+   Builds the 9 canopy panels (one per stage) + a dashed blueprint ghost.
    Default DOM state = fully built umbrella, so reduced-motion needs no JS. */
 const UMB = (function buildUmbrellaSvg() {
   const svg = document.getElementById('u-svg');
   if (!svg) return null;
   const NS = 'http://www.w3.org/2000/svg';
-  const AX = 300, AY = 72, RIM = 300, X0 = 60, X1 = 540, N = 7;
+  const AX = 300, AY = 72, RIM = 300, X0 = 60, X1 = 540, N = 9;
   const step = (X1 - X0) / N;
   const xs = Array.from({ length: N + 1 }, (_, i) => X0 + i * step);
   const ctrl = (x) => `${(AX + (x - AX) * 0.72).toFixed(1)} 132`; // apex→rim bow
@@ -722,11 +722,12 @@ function bootAnimated() {
     const ticks = Array.from(ticksWrap.children);
     const { panels, foldRots, pole, glow, rainG, domeY } = UMB;
     const N = panels.length;
-    // scrub-timeline layout: pole draw, one slot per panel/stage, finale glow,
-    // a hold, then a graceful EXIT that lifts the whole umbrella away before
-    // the pin releases into the light portfolio section.
-    const POLE = 0.9, PER = 1.2, FIN = 0.8, HOLD = 0.6, EXIT = 1.4;
-    const TOTAL = POLE + PER * N + FIN + HOLD + EXIT;
+    // scrub-timeline layout: an INTRO beat where the heading sits alone (the title
+    // moment) before anything draws, then pole draw, one slot per panel/stage,
+    // finale glow, a hold, then a graceful EXIT that lifts the whole umbrella away
+    // before the pin releases into the light portfolio section.
+    const INTRO = 0.7, POLE = 0.9, PER = 1.2, FIN = 0.8, HOLD = 0.6, EXIT = 1.4;
+    const TOTAL = INTRO + POLE + PER * N + FIN + HOLD + EXIT;
 
     // Stage text reveals IN STEP with its rib, then HOLDS fully visible while
     // that rib rests open. Only when the NEXT rib starts opening does the current
@@ -742,12 +743,19 @@ function bootAnimated() {
     if (STACKED) gsap.set(stageEls, { opacity: 0, y: 26, visibility: 'visible' });
     // flips the number, ticks and live-rib highlight to stage `idx` (state only —
     // the text opacity is animated by the scrub timeline, not here)
+    const countEl = numEl.closest('.umb-count');
+    // start hidden explicitly: markStage(-1) early-returns on the first call (cur is
+    // already -1), so the counter must begin without .is-live on its own.
+    if (countEl) countEl.classList.remove('is-live');
     function markStage(idx) {
       idx = Math.max(-1, Math.min(N - 1, idx));
       if (idx === cur) return;
       cur = idx;
       stageEls.forEach((el, i) => el.classList.toggle('is-on', i === idx));
-      numEl.textContent = String(Math.max(0, idx) + 1).padStart(2, '0');
+      // idx === -1 is the empty intro/pre-build state: keep the counter hidden so
+      // "01 / 09" only appears once the first stage is actually live.
+      if (countEl) countEl.classList.toggle('is-live', idx >= 0);
+      if (idx >= 0) numEl.textContent = String(idx + 1).padStart(2, '0');
       ticks.forEach((t, i) => t.classList.toggle('on', i === idx));
       panels.forEach((p, i) => p.classList.toggle('live', i === idx));
     }
@@ -772,31 +780,47 @@ function bootAnimated() {
       }
 
       // rain plays only during the finale window (after canopy is open, before exit)
-      const rainStart = (POLE + PER * N) / TOTAL;
-      const rainEnd = (POLE + PER * N + FIN + HOLD) / TOTAL;
+      const rainStart = (INTRO + POLE + PER * N) / TOTAL;
+      const rainEnd = (INTRO + POLE + PER * N + FIN + HOLD) / TOTAL;
 
-      const tl = gsap.timeline({
-        scrollTrigger: {
-          trigger: umb, start: 'top top', end: '+=' + endDist,
-          pin: true, scrub: 1, anticipatePin: 1,
-          onUpdate: (self) => {
-            if (self.progress > rainStart && self.progress < rainEnd && self.isActive) rainTl.play();
-            else rainTl.pause();
-          },
-          onLeave: () => rainTl.pause()
-        }
-      });
-      tl.to(pole, { strokeDashoffset: 0, duration: POLE, ease: 'none' }, 0);
       const RIB_DUR = PER * 0.85;
       // Text moves only while a rib is opening: it reveals/exits over the FIRST
       // part of each rib's fold, then HOLDS while the rib rests. TXT_DUR is that
       // active-transition slice (a bit shorter than the fold so the stage settles
       // fully visible before the rest begins).
       const TXT_DUR = RIB_DUR * 0.7;
-      // scrubbing back above rib #1's midpoint clears the readout to empty
-      tl.call(markStage, [-1], POLE);
+
+      // The readout (number/tick/live rib) is a pure function of the playhead's
+      // absolute time — NOT one-shot .call() markers. .call() fires asymmetrically
+      // on a scrubbed reverse (e.g. after 09/09 the number stayed at 09 while ribs
+      // folded back), so instead we recompute the active stage on every scrub tick
+      // in both directions. Stage `i` becomes current once the playhead passes rib
+      // `i`'s reveal midpoint; below rib 0's midpoint the readout clears to empty.
+      const stageAt = (t) => {
+        for (let i = N - 1; i >= 0; i--) {
+          if (t >= INTRO + POLE + PER * i + TXT_DUR * 0.5) return i;
+        }
+        return -1;
+      };
+
+      const tl = gsap.timeline({
+        scrollTrigger: {
+          trigger: umb, start: 'top top', end: '+=' + endDist,
+          pin: true, scrub: 1, anticipatePin: 1,
+          onUpdate: (self) => {
+            markStage(stageAt(tl.time()));
+            if (self.progress > rainStart && self.progress < rainEnd && self.isActive) rainTl.play();
+            else rainTl.pause();
+          },
+          onLeave: () => rainTl.pause()
+        }
+      });
+      // INTRO beat: heading holds alone on screen; the pole only begins drawing
+      // once this title moment has passed.
+      tl.to(pole, { strokeDashoffset: 0, duration: POLE, ease: 'none' }, INTRO);
+
       panels.forEach((p, i) => {
-        const at = POLE + PER * i;
+        const at = INTRO + POLE + PER * i;
         // the rib folds open across [at, at + RIB_DUR]
         tl.from(p, { svgOrigin: '300 72', rotation: foldRots[i], opacity: 0, duration: RIB_DUR, ease: 'power2.out' }, at);
         // STACKED (desktop/tablet): as THIS rib starts opening, the previous stage
@@ -806,12 +830,10 @@ function bootAnimated() {
           if (i > 0) tl.to(stageEls[i - 1], { opacity: 0, y: -18, duration: TXT_DUR, ease: 'power2.in' }, at);
           tl.fromTo(stageEls[i], { opacity: 0, y: 26 }, { opacity: 1, y: 0, duration: TXT_DUR, ease: 'power2.out' }, at);
         }
-        // flip number/tick/live highlight partway through the reveal (state only)
-        tl.call(markStage, [i], at + TXT_DUR * 0.5);
       });
       // after the LAST rib, the final stage simply holds — nothing fades it out.
       // FINALE — glow blooms while everything is still on screen
-      const finAt = POLE + PER * N;
+      const finAt = INTRO + POLE + PER * N;
       tl.to(glow, { opacity: 0.5, duration: FIN * 0.7 }, finAt);
 
       // EXIT — after a brief hold, the whole umbrella lifts + fades away and the
@@ -831,7 +853,7 @@ function bootAnimated() {
     }
 
     const mm = gsap.matchMedia();
-    mm.add('(min-width: 981px)', () => buildPinned(4200));
-    mm.add('(max-width: 980px)', () => buildPinned(2800));
+    mm.add('(min-width: 981px)', () => buildPinned(5660));
+    mm.add('(max-width: 980px)', () => buildPinned(3770));
   }
 }
