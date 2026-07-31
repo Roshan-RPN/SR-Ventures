@@ -63,6 +63,20 @@ gallery.innerHTML = projects.map(card).join('');
 
 const items = () => Array.from(gallery.querySelectorAll('.pf-item'));
 
+/* Arriving from a home-page portfolio card (portfolio.html?cat=kitchen) opens the
+   page already filtered to that category. Validated against the real filter chips,
+   so a hand-typed or stale ?cat= simply falls back to "all" instead of rendering an
+   empty grid. This runs BEFORE the first reveal so the correct cards are the ones
+   that animate in — applying it later would flash "All" and then swap. */
+const INITIAL_CAT = (() => {
+  const raw = new URLSearchParams(location.search).get('cat');
+  if (!raw) return 'all';
+  const cat = raw.toLowerCase();
+  const known = Array.from(document.querySelectorAll('.filter-btn'))
+    .map(b => b.dataset.filter);
+  return known.includes(cat) ? cat : 'all';
+})();
+
 // Lazy-loaded images report 0 height until decoded, so any ScrollTrigger
 // measured before they finish loading is stale — with 25 cards on this page
 // that showed up as a lag/late pop for whatever the user had already scrolled
@@ -184,6 +198,18 @@ function introVisibleCards() {
   inView.forEach(primePfCard);
   inView.forEach((el, i) => revealPfCard(el, 0.55 + i * 0.1));
 }
+
+/* Deep link from a home card: hide the other categories and light up the matching
+   chip BEFORE the intro runs, so the category's own cards are the ones that
+   animate in. setDisplay() is the same function the chips use, so the resulting
+   state is identical to having clicked that chip by hand. */
+if (INITIAL_CAT !== 'all') {
+  setDisplay(INITIAL_CAT);
+  document.querySelectorAll('.filter-btn').forEach(b => {
+    b.classList.toggle('active', b.dataset.filter === INITIAL_CAT);
+  });
+}
+
 introVisibleCards();
 
 // first load: below-fold cards get the scroll batch; the in-view row is owned by

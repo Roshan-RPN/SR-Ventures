@@ -37,10 +37,19 @@ window.addEventListener('pageshow', (e) => { if (e.persisted) location.reload();
   const grid = document.getElementById('home-portfolio');
   if (!grid || !window.SR_PROJECTS) return;
   const label = (c) => (window.SR_CAT_LABELS && window.SR_CAT_LABELS[c]) || c;
+  /* Each card is a real <a> into the portfolio page with the category in the URL
+     (?cat=kitchen), so the portfolio page can open on that filter. It stays a
+     plain link rather than a click handler so middle-click / "open in new tab" /
+     crawlers all behave normally, and it works before JS on the other page runs.
+     The <figure> remains the outer element so every existing .pf-item selector,
+     GSAP target and data-cat lookup is untouched. */
   grid.innerHTML = window.SR_PROJECTS.slice(0, 6).map(p => `
     <figure class="pf-item" data-cat="${p.category}">
-      <img src="${p.img}" alt="${p.alt}" loading="lazy" width="800" height="600" />
-      <figcaption><span class="t">${p.title}</span><span class="c">${label(p.category)}</span></figcaption>
+      <a class="pf-item-link" href="portfolio.html?cat=${encodeURIComponent(p.category)}"
+         aria-label="${p.title}. View all ${label(p.category)} projects">
+        <img src="${p.img}" alt="${p.alt}" loading="lazy" width="800" height="600" />
+        <figcaption><span class="t">${p.title}</span><span class="c">${label(p.category)}</span></figcaption>
+      </a>
     </figure>`).join('');
   // Lazy-loaded images report 0 height until decoded, so any ScrollTrigger
   // measured before they finish loading is stale — the umbrella's huge pin
