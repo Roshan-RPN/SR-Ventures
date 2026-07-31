@@ -42,6 +42,14 @@ window.addEventListener('pageshow', (e) => { if (e.persisted) location.reload();
       <img src="${p.img}" alt="${p.alt}" loading="lazy" width="800" height="600" />
       <figcaption><span class="t">${p.title}</span><span class="c">${label(p.category)}</span></figcaption>
     </figure>`).join('');
+  // Lazy-loaded images report 0 height until decoded, so any ScrollTrigger
+  // measured before they finish loading is stale — the umbrella's huge pin
+  // above this section makes the mismeasure especially visible as a lag/pop
+  // further down the page. Re-measure once each image is actually in.
+  grid.querySelectorAll('img').forEach((img) => {
+    if (img.complete) return;
+    img.addEventListener('load', () => window.ScrollTrigger && ScrollTrigger.refresh(), { once: true });
+  });
 })();
 
 /* ---------- Year ---------- */
@@ -234,13 +242,13 @@ document.querySelectorAll('.faq-item').forEach(item => {
 })();
 
 /* ---------- Umbrella SVG geometry — runs in all modes ----------
-   Builds the 9 canopy panels (one per stage) + a dashed blueprint ghost.
+   Builds the 12 canopy panels (one per stage) + a dashed blueprint ghost.
    Default DOM state = fully built umbrella, so reduced-motion needs no JS. */
 const UMB = (function buildUmbrellaSvg() {
   const svg = document.getElementById('u-svg');
   if (!svg) return null;
   const NS = 'http://www.w3.org/2000/svg';
-  const AX = 300, AY = 72, RIM = 300, X0 = 60, X1 = 540, N = 9;
+  const AX = 300, AY = 72, RIM = 300, X0 = 60, X1 = 540, N = 12;
   const step = (X1 - X0) / N;
   const xs = Array.from({ length: N + 1 }, (_, i) => X0 + i * step);
   const ctrl = (x) => `${(AX + (x - AX) * 0.72).toFixed(1)} 132`; // apex→rim bow
@@ -447,21 +455,75 @@ function bootAnimated() {
      (It used to fire immediately, so the whole animation finished behind the
      loader curtain and the intro looked static by the time it was visible.) ---- */
   gsap.set('.intro-title .ch', { yPercent: 118, rotate: 5 });
-  gsap.set('.intro-label, .intro-tagline, .intro-meta, .scroll-indicator', { y: 28, opacity: 0 });
+  gsap.set('.intro-label', { y: 22, opacity: 0 });
+  gsap.set('.intro-tagline', { y: 36, opacity: 0 });
+  gsap.set('.intro-meta', { y: 30, opacity: 0 });
+  gsap.set('.scroll-indicator', { y: 20, opacity: 0 });
   gsap.set('.intro-logo', { opacity: 0, scale: 0.78, y: -26, filter: 'blur(6px)' });
   gsap.set('.hero-bg', { scale: 1.16 });
   let introPlayed = false;
   function introReveal() {
     if (introPlayed) return; introPlayed = true;
+    // Mobile target opacity for the backdrop matches the CSS (.hero-bg{opacity:.4}
+    // under 768px) — tweening to the desktop 0.28 would visibly DIM the photo the
+    // mobile rules were written to keep visible.
+    const bgTarget = IS_MOBILE ? 0.4 : 0.28;
     const tl = gsap.timeline({ delay: 0.25 });
-    tl.fromTo('.hero-bg', { opacity: 0 }, { opacity: 0.28, scale: 1, duration: 2.6, ease: 'power2.out' }, 0)
+    tl.fromTo('.hero-bg', { opacity: 0 }, { opacity: bgTarget, scale: 1, duration: 2.6, ease: 'power2.out' }, 0)
       // logo crowns the intro first — settles in with a soft de-blur + scale
       .to('.intro-logo', { opacity: 1, scale: 1, y: 0, filter: 'blur(0px)', duration: 1.4, ease: 'power3.out' }, 0.1)
-      .to('.intro-title .ch', { yPercent: 0, rotate: 0, stagger: 0.06, duration: 1.3, ease: 'power4.out' }, 0.7)
-      .to('.intro-label, .intro-tagline, .intro-meta, .scroll-indicator',
-        { y: 0, opacity: 1, stagger: 0.16, duration: 1.0, ease: 'power3.out' }, 1.4);
+      .to('.intro-label', { y: 0, opacity: 1, duration: 0.8, ease: 'power3.out' }, 0.55)
+      .to('.intro-title .ch', { yPercent: 0, rotate: 0, stagger: 0.06, duration: 1.3, ease: 'power4.out' }, 0.75)
+      // tagline + meta + scroll cue land as their own distinct beats, not one
+      // simultaneous group-fade, so the reveal reads as a deliberate sequence.
+      .to('.intro-tagline', { y: 0, opacity: 1, duration: 1.0, ease: 'power3.out' }, 1.55)
+      .to('.intro-meta', { y: 0, opacity: 1, duration: 0.9, ease: 'power3.out' }, 1.78)
+      .to('.scroll-indicator', { y: 0, opacity: 1, duration: 0.8, ease: 'power3.out' }, 2.0);
     // gentle continuous float once it has landed
     gsap.to('.intro-logo', { y: -10, duration: 3.2, ease: 'sine.inOut', repeat: -1, yoyo: true, delay: 1.8 });
+
+    /* MOBILE: animate the WHOLE hero, not just the heading (per client — "only the
+       headings are getting animated"). Two extra layers on top of the entrance
+       above, both scoped to mobile so the desktop composition is untouched:
+       1. a per-element ENTRANCE flourish — the logo plate swings up with a slight
+          rotation and the tagline/meta/label sweep in horizontally, so every part
+          of the section visibly moves rather than only the letters;
+       2. a SCROLL-LINKED layer — as you begin to scroll away, the logo, copy and
+          backdrop drift apart at different rates (a parallax departure) so the
+          section stays alive under the finger instead of just fading out. */
+    if (!IS_MOBILE) return;
+    gsap.fromTo('.intro-logo', { rotate: -6 }, { rotate: 0, duration: 1.5, ease: 'power3.out', delay: 0.35 });
+    gsap.fromTo('.intro-label', { x: -18 }, { x: 0, duration: 1.0, ease: 'power3.out', delay: 0.8 });
+    gsap.fromTo('.intro-tagline', { x: 16 }, { x: 0, duration: 1.1, ease: 'power3.out', delay: 1.8 });
+    gsap.fromTo('.intro-meta', { letterSpacing: '0.34em' },
+      { letterSpacing: '0.14em', duration: 1.2, ease: 'power3.out', delay: 2.0,
+        onComplete: () => gsap.set('.intro-meta', { clearProps: 'letterSpacing' }) });
+
+    // Scroll-linked departure. The hero's own opacity is driven by the film scrub
+    // (see initScrollScene), so we only move things here — never touch opacity, or
+    // the two would fight. `.intro-logo` already has a looping y-float tween, so
+    // its parallax rides on scale/rotation instead of y to avoid a conflict.
+    const heroEl = document.getElementById('hero');
+    const depart = { trigger: heroEl, start: 'top top', end: 'bottom top', scrub: 0.8 };
+    // Each departure tween must start from y:0 EXPLICITLY. The entrance timeline
+    // begins these elements at y:22/36/30 and animates them to 0; a bare
+    // `gsap.to({y:-40})` records its start value when ScrollTrigger first
+    // evaluates it and can latch onto that pre-entrance offset instead. That is
+    // exactly what caused the overlap: on the first scroll frame `.intro-label`
+    // snapped back DOWN to y:+21.5 — straight on top of "SR VENTURES" — and then
+    // crept up from there. fromTo with immediateRender:false pins the start at 0
+    // without letting the tween paint before the entrance has finished.
+    const departFrom = (sel, y) => gsap.fromTo(sel, { y: 0 },
+      { y, ease: 'none', immediateRender: false, overwrite: 'auto', scrollTrigger: depart });
+    gsap.to('.intro-logo', { scale: 0.82, rotate: -4, ease: 'none', scrollTrigger: depart });
+    // Label and title travel nearly together (6px apart). A wider split let the
+    // 16px resting gap close to zero by the end of the hero exit; the visible
+    // parallax spread lives in the tagline/meta below, which have room for it.
+    departFrom('.intro-label', -46);
+    departFrom('.intro-title', -52);
+    departFrom('.intro-tagline', -78);
+    departFrom('.intro-meta', -104);
+    gsap.to('.scroll-indicator', { y: 30, ease: 'none', scrollTrigger: depart });
   }
 
   function initScrollScene() {
@@ -510,12 +572,24 @@ function bootAnimated() {
        (user complaint: "15+ etc. already finished before I reach the section"). */
     const statNumbers = document.querySelectorAll('.stat-number');
     if (IS_MOBILE) {
+      // MUCH slower count-up (per client): the number must not reach its final
+      // value until the trust section has travelled all the way up and FILLS the
+      // mobile screen. The old window (top 82% → top 30%) completed while #trust
+      // was still ~200px BELOW the fold, so "132+" was already sitting there fully
+      // counted before you ever saw the section — it never read as counting.
+      //   start 'top bottom'  → counting begins the instant the section's first
+      //                         pixel appears at the bottom edge,
+      //   end   'top top'     → and only finishes once the section top reaches the
+      //                         viewport top, i.e. it now fills the screen.
+      // That is a full viewport-height of scroll per count instead of ~52% of one,
+      // and a higher scrub value adds extra lag so the digits keep climbing for a
+      // moment after the finger stops.
       statNumbers.forEach(el => {
         const target = parseFloat(el.dataset.value);
         const decimals = parseInt(el.dataset.decimals || '0');
         const obj = { v: 0 };
         gsap.to(obj, { v: target, ease: 'none',
-          scrollTrigger: { trigger: '#trust', start: 'top 82%', end: 'top 30%', scrub: 0.6 },
+          scrollTrigger: { trigger: '#trust', start: 'top bottom', end: 'top top', scrub: 1.2 },
           onUpdate: () => { el.textContent = obj.v.toFixed(decimals); } });
       });
     } else {
@@ -755,12 +829,20 @@ function bootAnimated() {
     };
     pfCards.forEach(primeCard);
     if (IS_MOBILE) {
-      // Mobile: reveal each card ONE AT A TIME as it individually crosses into view.
+      // Mobile: the wipe is SCRUBBED to each card's own scroll position, so the
+      // image is literally drawn in by the scroll (stop scrolling → the reveal
+      // stops mid-way). A one-shot tween here was fighting the eager safety net
+      // below and finishing invisibly; scrubbing makes the animation impossible
+      // to miss because it IS the scroll.
       pfCards.forEach((el) => {
-        ScrollTrigger.create({
-          trigger: el, start: 'top 88%', once: true,
-          onEnter: () => revealCard(el)
-        });
+        gsap.fromTo(el,
+          { y: 40, opacity: 0, clipPath: 'inset(0% 0% 100% 0%)', webkitClipPath: 'inset(0% 0% 100% 0%)' },
+          { y: 0, opacity: 1, clipPath: 'inset(0% 0% 0% 0%)', webkitClipPath: 'inset(0% 0% 0% 0%)',
+            ease: 'none', immediateRender: false,
+            scrollTrigger: { trigger: el, start: 'top 95%', end: 'top 58%', scrub: 0.6 } });
+        gsap.fromTo(pfImg(el), { scale: 1.22 },
+          { scale: 1, ease: 'none', immediateRender: false,
+            scrollTrigger: { trigger: el, start: 'top 95%', end: 'top 45%', scrub: 0.6 } });
       });
     } else {
       // Desktop: batch whatever entered together and stagger the wipe.
@@ -768,14 +850,17 @@ function bootAnimated() {
         start: 'top 86%',
         onEnter: (els) => els.forEach((el, i) => revealCard(el, i * 0.12))
       });
+      // LATE safety (desktop only): if a card is somehow still hidden once the
+      // section is fully centred it gets forced on. NOT applied on mobile — there
+      // the reveal is scrub-driven, and this trigger fired while later cards were
+      // still below the fold, snapping all six visible at once and destroying the
+      // per-card animation entirely ("the portfolio animation doesn't work").
+      ScrollTrigger.create({ trigger: '#portfolio', start: 'top 20%', once: true,
+        onEnter: () => {
+          const stuck = pfCards.filter(el => +gsap.getProperty(el, 'opacity') < 0.05);
+          stuck.forEach(el => revealCard(el));
+        } });
     }
-    // LATE safety: only if a card is somehow still hidden once the section is
-    // fully centred does it get forced on — the real per-card reveal fires first.
-    ScrollTrigger.create({ trigger: '#portfolio', start: 'top 20%', once: true,
-      onEnter: () => {
-        const stuck = pfCards.filter(el => +gsap.getProperty(el, 'opacity') < 0.05);
-        stuck.forEach(el => revealCard(el));
-      } });
 
     // testimonial cards fan in once when the section arrives
     gsap.set('#testi-track .testi', { y: 44, opacity: 0 });
@@ -807,7 +892,7 @@ function bootAnimated() {
   }
 
   /* ---- The Umbrella Concept — the umbrella, built live ----
-     ALL viewports pin the section: scroll draws the pole, then fans the 7
+     ALL viewports pin the section: scroll draws the pole, then fans the 12
      canopy panels open ONE AT A TIME — and the stage readout swaps in sync
      with each rib, so every rib IS its step. Finale: glow + rain that dies
      on the canopy, then the whole scene lifts away before the pin releases. */
@@ -953,11 +1038,14 @@ function bootAnimated() {
       };
     }
 
+    // Pin distances were tuned per-rib at N=9 (5660px / 5200px desktop/mobile,
+    // i.e. TOTAL=15.2 beats); scale by the same beats-per-rib so 12 ribs still
+    // get the same scroll distance per rib instead of compressing thinner.
     const mm = gsap.matchMedia();
-    mm.add('(min-width: 981px)', () => buildPinned(5660, 1));
+    mm.add('(min-width: 981px)', () => buildPinned(Math.round(5660 * (TOTAL / 15.2)), 1));
     // Mobile: longer pin distance (~410px per rib, up from ~300) + higher scrub
     // smoothing so a single touch flick can't snap the playhead through 2-3 ribs
     // at once — the ribs now open one at a time as you scroll.
-    mm.add('(max-width: 980px)', () => buildPinned(5200, 1.4));
+    mm.add('(max-width: 980px)', () => buildPinned(Math.round(5200 * (TOTAL / 15.2)), 1.4));
   }
 }

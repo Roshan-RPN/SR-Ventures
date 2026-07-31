@@ -35,6 +35,7 @@ window.addEventListener('pageshow', (e) => { if (e.persisted) location.reload();
 /* ---- Lenis smooth scroll (matches the home page feel) ---- */
 if (!REDUCED && window.Lenis) {
   const lenis = new Lenis({ duration: 1.5, wheelMultiplier: 0.85, easing: (t) => Math.min(1, 1.001 - Math.pow(2, -10 * t)), smoothWheel: true });
+  window.lenis = lenis;
   lenis.on('scroll', ScrollTrigger.update);
   gsap.ticker.add((time) => lenis.raf(time * 1000));
   gsap.ticker.lagSmoothing(0);
@@ -62,6 +63,15 @@ gallery.innerHTML = projects.map(card).join('');
 
 const items = () => Array.from(gallery.querySelectorAll('.pf-item'));
 
+// Lazy-loaded images report 0 height until decoded, so any ScrollTrigger
+// measured before they finish loading is stale — with 25 cards on this page
+// that showed up as a lag/late pop for whatever the user had already scrolled
+// past. Re-measure once each image actually finishes loading.
+gallery.querySelectorAll('img').forEach((img) => {
+  if (img.complete) return;
+  img.addEventListener('load', () => window.ScrollTrigger && ScrollTrigger.refresh(), { once: true });
+});
+
 const PF_MOBILE = window.matchMedia('(max-width: 768px)').matches;
 /* IMAGE REVEAL: instead of just fading/sliding the whole card, wipe the frame
    open with a clip-path while the IMAGE inside eases down from a gentle zoom, so
@@ -88,6 +98,28 @@ function revealPfCard(el, delay = 0) {
   return tl;
 }
 
+/* SCROLL-DRIVEN reveal (per client): the wipe + image un-zoom are SCRUBBED to the
+   card's own position in the viewport, so the photo is drawn in by the act of
+   scrolling — stop scrolling and the reveal stops mid-way. This replaces the
+   one-shot tween, which fired-and-finished on its own clock and so read as
+   "the images just appear" rather than as a scroll animation. Each card carries
+   its own trigger, tagged 'pf-card' so a filter change can tear them all down. */
+function scrubPfCard(el) {
+  const img = pfImgOf(el);
+  gsap.fromTo(el,
+    { opacity: 0, y: PF_MOBILE ? 34 : 48,
+      clipPath: 'inset(0% 0% 100% 0%)', webkitClipPath: 'inset(0% 0% 100% 0%)' },
+    { opacity: 1, y: 0,
+      clipPath: 'inset(0% 0% 0% 0%)', webkitClipPath: 'inset(0% 0% 0% 0%)',
+      ease: 'none', immediateRender: false,
+      scrollTrigger: { id: 'pf-card', trigger: el,
+        start: 'top 95%', end: PF_MOBILE ? 'top 58%' : 'top 62%', scrub: 0.6 } });
+  gsap.fromTo(img, { scale: 1.2 },
+    { scale: 1, ease: 'none', immediateRender: false,
+      scrollTrigger: { id: 'pf-card', trigger: el,
+        start: 'top 95%', end: PF_MOBILE ? 'top 45%' : 'top 50%', scrub: 0.6 } });
+}
+
 /* ---- Scroll-driven reveal: each card slides up + fades as it enters ----
    gsap.set primes the hidden state; a batch animates whatever just entered.
    A once-safety forces everything visible if a batch is ever skipped, so cards
@@ -101,22 +133,22 @@ function revealGallery(onlyBelowFold) {
   if (REDUCED) return;
   ScrollTrigger.getAll().forEach(t => { if (t.vars && t.vars.id === 'pf-card') t.kill(); });
   const cards = items().filter(el => el.style.display !== 'none');
-  // Only PRIME cards that are still below the fold — cards already on screen must
-  // not be re-hidden (that would blank the top of a freshly-filtered category).
+  // Only build scrub triggers for cards still below the fold — a card already on
+  // screen must not be re-hidden (that would blank the top of a freshly-filtered
+  // category, and on first load the in-view row is owned by introVisibleCards()).
   const H = window.innerHeight;
   const below = cards.filter(el => el.getBoundingClientRect().top >= H * 0.9);
-  below.forEach(primePfCard);
-  // On first load the in-view row is animated by introVisibleCards(); batching it
-  // here too would fire onEnter immediately and snap it visible, killing that
-  // entrance. So build the batch from just the below-fold cards in that case.
-  const batchTargets = onlyBelowFold ? below : cards;
-  ScrollTrigger.batch(batchTargets, {
-    id: 'pf-card',
-    start: 'top 92%',
-    onEnter: (els) => els.forEach((el, i) => revealPfCard(el, i * 0.09))
-  });
-  // safety: anything still hidden after a beat gets forced visible
+  const targets = onlyBelowFold ? below : cards.filter(el => el.getBoundingClientRect().top >= H * 0.9);
+  targets.forEach(primePfCard);
+  targets.forEach(scrubPfCard);
+  // Anything already in view when a filter is applied is settled visible by the
+  // caller (applyFilter / introVisibleCards), so nothing can be stranded hidden.
   ScrollTrigger.refresh();
+  // NOTE: the old "force-reveal anything still at opacity 0" sweep is gone. With a
+  // scrubbed reveal, opacity 0 is a legitimate mid-animation state for a card that
+  // simply hasn't been scrolled to yet — the sweep would snap it visible and cancel
+  // the very scroll animation it was meant to protect. ScrollTrigger.refresh() (also
+  // called by each image's load handler) keeps the scrub positions correct instead.
 }
 
 // page header + CTA band reveal
@@ -200,21 +232,27 @@ function applyFilter(cat) {
       //    new visible set.
       const shown = items().filter(el => el.style.display !== 'none');
       gsap.to(gallery, { opacity: 1, duration: 0.28, ease: 'power1.out', overwrite: true });
+      // Same clip-path wipe + image-zoom reveal as "All" / first load, so every
+      // category entrance matches — previously this used a plain opacity/y drift,
+      // which looked like a different, lesser animation per category.
       const H = window.innerHeight;
       const inView = shown.filter(el => el.getBoundingClientRect().top < H * 0.9);
-      gsap.set(inView, { opacity: 1, y: 18, clearProps: 'clipPath,webkitClipPath' });
-      gsap.set(inView.map(pfImgOf), { clearProps: 'transform' });
-      gsap.to(inView, { y: 0, duration: 0.55, stagger: 0.04, ease: 'power3.out',
-        overwrite: true, onComplete: () => gsap.set(inView, { clearProps: 'transform' }) });
+      inView.forEach(primePfCard);
+      inView.forEach((el, i) => revealPfCard(el, i * 0.06));
       // (re)builds the scroll reveal so below-the-fold cards animate in on scroll
       revealGallery();
     } });
-  // absolute safety: if anything interrupts, force a clean visible state
+  // absolute safety: if anything interrupts, force a clean visible state. Scope it
+  // to the GRID and to cards currently IN VIEW only — below-fold cards are mid-scrub
+  // (legitimately at opacity 0) and forcing them visible here would cancel their
+  // scroll animation before the user ever reaches them.
   applyFilter._t = setTimeout(() => {
     gsap.set(gallery, { opacity: 1, clearProps: 'transform' });
-    const shown = items().filter(el => el.style.display !== 'none');
-    gsap.set(shown, { opacity: 1, y: 0, clearProps: 'transform,clipPath,webkitClipPath' });
-    gsap.set(shown.map(pfImgOf), { clearProps: 'transform' });
+    const H = window.innerHeight;
+    const shownInView = items().filter(el => el.style.display !== 'none'
+      && el.getBoundingClientRect().top < H * 0.9);
+    gsap.set(shownInView, { opacity: 1, y: 0, clearProps: 'transform,clipPath,webkitClipPath' });
+    gsap.set(shownInView.map(pfImgOf), { clearProps: 'transform' });
   }, 900);
 }
 
@@ -223,5 +261,14 @@ document.getElementById('filter-bar').addEventListener('click', (e) => {
   if (!btn) return;
   document.querySelectorAll('.filter-btn').forEach(b => b.classList.remove('active'));
   btn.classList.add('active');
+  // Categories have different card counts, so whatever scroll depth you were at
+  // in the OLD category can land past the END of the new one (e.g. deep in
+  // Kitchen, click Bedroom — the browser keeps the scroll offset, which now
+  // sits below Bedroom's last card, so it looks like "the last image is shown").
+  // Snap back to the top of the gallery on every filter change so each category
+  // always starts from its own first card.
+  const filterBar = document.getElementById('filter-bar');
+  const y = window.scrollY + gallery.getBoundingClientRect().top - filterBar.offsetHeight - 8;
+  if (window.lenis) window.lenis.scrollTo(y, { immediate: true }); else window.scrollTo(0, Math.max(0, y));
   applyFilter(btn.dataset.filter);
 });

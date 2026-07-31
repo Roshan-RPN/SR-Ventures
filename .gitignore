@@ -1,9 +1,18 @@
 # Unused heavy source/media (not referenced by the site)
+# The originals in Images/ are what the Images/web/*.webp files were encoded from.
+# They stay on disk as the master copies, but the site never loads them, so there
+# is no reason to ship ~8MB of them to the repo. Only Images/web/ is served.
 Video/
 Images/*.psd
+Images/*.jpg
+Images/*.jpeg
+Images/*.png
+Images/*.avif
+!Images/logo.jpeg
 
 # Agent tooling / workflow docs — not part of the website
 skills/
+*.skill
 
 # Backups & temp
 *.backup.md

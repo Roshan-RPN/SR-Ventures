@@ -9,11 +9,10 @@
 - Land legal documentation and building approvals (handled in-house)
 
 ## Key facts
-- Location / service area: Kochi, Ernakulam, Thrissur and surrounding districts, Kerala, India
-- Homes delivered: 120+
+- Location / service area: Thrissur, Ernakulam, Alappuzha, Kollam, Trivandrum and surrounding districts, Kerala, India
+- Homes delivered: 132+
 - Years operating: 11
 - On-time handover rate: 98%
-- Average client rating: 4.9 / 5
 - Typical villa build time: 8–11 months for a 2,000–2,500 sq ft home, from approved drawings to handover
 - Pricing model: transparent fixed-cost estimate agreed before work begins
 
@@ -21,11 +20,11 @@
 Unlike a builder who hands off to a separate interior firm, SR Ventures keeps design, construction and legal under one accountable team — so there are no coordination gaps between the drawing and the doorway.
 
 ## Pages
-- Home: https://srventures.example/
-- Portfolio (exteriors, interiors, kitchens, bedrooms, living rooms, dining rooms, wardrobes): https://srventures.example/portfolio.html
+- Home: https://srventures.org.in/
+- Portfolio (exteriors, interiors, kitchens, bedrooms, living rooms, dining rooms, wardrobes): https://srventures.org.in/portfolio.html
 
 ## Contact
-- Phone / WhatsApp: +91 97465 67362
+- Phone / WhatsApp: +91 62359 65555
 - Address: First Floor, St. Sebastian's Shopping Complex, Above Federal Bank, Neendakara, Kollam, Kerala 691582
 - Hours: Mon–Sat 8:00 AM – 6:00 PM; Sundays closed
 - Facebook: https://www.facebook.com/srventures0
